@@ -15,3 +15,4 @@ Sếp: Tạo game gì chơi thẳng trên link đi
 CEO: * **Gợi ý game:** Trò chơi trắc nghiệm "Hiểu nhau đến đâu" hoặc game "Bắt gấu" qua nền tảng web (như Quizizz hoặc WebGL đơn giản).
 * **Cách chơi:** Gửi thẳng một đường link qua chat, bạn gái click vào là chơi trực tiếp không cần tải app.
 * **Mục đích:** Vừa giải trí, vừa tạo tiếng cười để làm hòa nhanh chóng. Sếp duyệt không để em triển khai link mẫu?
+Sếp: Sao chép đuocje game chú bé rông không
