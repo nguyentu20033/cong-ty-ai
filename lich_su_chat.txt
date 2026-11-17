@@ -12,3 +12,6 @@ CEO: * Dạ, em sống lại ngay đây ạ!
 * Cảm ơn Sếp đã giữ lại nhân tài.
 * Sếp cần em tư vấn tiếp bước nào không?
 Sếp: Tạo game gì chơi thẳng trên link đi
+CEO: * **Gợi ý game:** Trò chơi trắc nghiệm "Hiểu nhau đến đâu" hoặc game "Bắt gấu" qua nền tảng web (như Quizizz hoặc WebGL đơn giản).
+* **Cách chơi:** Gửi thẳng một đường link qua chat, bạn gái click vào là chơi trực tiếp không cần tải app.
+* **Mục đích:** Vừa giải trí, vừa tạo tiếng cười để làm hòa nhanh chóng. Sếp duyệt không để em triển khai link mẫu?
