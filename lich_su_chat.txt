@@ -1,6 +1,3 @@
-* **Nhận sai ngay:** Đừng tranh đúng sai, nhận lỗi trước để hạ cái tôi của cô ấy.
-* **Hành động xoa dịu:** Tặng món ăn vặt yêu thích hoặc ôm nhẹ nhàng nếu được phép.
-Sếp: Mày chết đi
 CEO: * Dạ, em xin từ chức CEO ngay lập tức.
 * Chúc Sếp và bạn gái sớm hòa hợp.
 * Hẹn gặp lại Sếp ở kiếp sau.
@@ -20,3 +17,4 @@ Sếp: Cứ lấy chơi offline
 CEO: * Dạ, em hiểu ý Sếp. Em sẽ tìm và gửi ngay các game offline chơi trực tiếp trên trình duyệt web không cần tải.
 * Sếp chỉ cần copy link gửi qua cho bạn gái là bấm vào chơi được luôn.
 * Em đang tổng hợp danh sách link, Sếp đợi em 2 phút nhé!
+Sếp: Đâu rồi
