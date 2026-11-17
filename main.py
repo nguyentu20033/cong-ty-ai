@@ -1,216 +1,291 @@
 import os
+import threading
 import time
 import base64
-import threading
 import py_compile
 import requests
-import telebot
+from collections import deque
 from flask import Flask
 from google import genai
+from google.genai import types
 
-# --- 1. WEB SERVER GIỮ KẾT NỐI 24/7 CHO RENDER ---
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Cong ty 5 AI dang hoat dong 24/7!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-# --- 2. NẠP KEY & TOKEN TỪ KÉT SẮT RENDER ---
-client = genai.Client(api_key=os.environ.get("GEMINI_KEY"))
-bot_ceo = telebot.TeleBot(os.environ.get("TOKEN_CEO"))
-bot_dev = telebot.TeleBot(os.environ.get("TOKEN_DEV"))
-bot_mkt = telebot.TeleBot(os.environ.get("TOKEN_MKT"))
-bot_qa  = telebot.TeleBot(os.environ.get("TOKEN_QA"))
-bot_hr  = telebot.TeleBot(os.environ.get("TOKEN_HR"))
-
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+# ==========================================
+# 1. CẤU HÌNH HỆ THỐNG & BẢO MẬT
+# ==========================================
+GEMINI_KEY = os.environ.get("GEMINI_KEY", "").strip()
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 REPO_NAME = "nguyentu20033/cong-ty-ai"
 FILE_PATH = "main.py"
-FILE_BO_NHO = "bo_nho_cong_ty_AI.txt"
+MEMORY_FILE = "bo_nho_cong_ty_AI.txt"
 
-def doc_bo_nho():
-    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_BO_NHO}"
+TOKENS = {
+    "CEO": os.environ.get("TOKEN_CEO", "").strip(),
+    "DEV": os.environ.get("TOKEN_DEV", "").strip(),
+    "MKT": os.environ.get("TOKEN_MKT", "").strip(),
+    "QA":  os.environ.get("TOKEN_QA", "").strip(),
+    "HR":  os.environ.get("TOKEN_HR", "").strip(),
+}
+
+client = genai.Client(api_key=GEMINI_KEY)
+
+# ==========================================
+# 2. BỘ NHỚ TỐC ĐỘ CAO TRÊN RAM + GITHUB
+# ==========================================
+BO_NHO_RAM = ""
+LICH_SU_CHAT = deque(maxlen=30)
+DEM_TIN_NHAN = 0
+LOCK_GITHUB = threading.Lock()
+
+def tai_bo_nho_tu_github():
+    global BO_NHO_RAM
+    if not GITHUB_TOKEN:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                BO_NHO_RAM = f.read()
+        return
+    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{MEMORY_FILE}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     try:
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            content_encoded = r.json().get("content", "")
-            return base64.b64decode(content_encoded).decode("utf-8")
-    except Exception:
-        pass
-    return "Chưa có dữ liệu dự án."
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            content_b64 = res.json().get("content", "")
+            BO_NHO_RAM = base64.b64decode(content_b64).decode("utf-8")
+        else:
+            BO_NHO_RAM = "HỒ SƠ VẬN HÀNH CÔNG TY:\n- Hệ thống 5 AI vận hành chế độ thực chiến."
+    except Exception as e:
+        print(f"Lỗi tải bộ nhớ GitHub: {e}")
 
-def nen_ky_uc_tinh_gon(du_lieu_tho):
-    prompt = f"Cô đọng nội dung sau thành BẢN HỒ SƠ Ý CHÍNH (tối đa 1.500 ký tự), chia 4 mục: [MỤC TIÊU] | [ĐÃ CHỐT] | [KỸ THUẬT & MKT] | [RỦI RO CẦN TRÁNH].\nDữ liệu:\n{du_lieu_tho}"
-    for m in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
+def _day_bo_nho_ngam(noi_dung_moi):
+    if not GITHUB_TOKEN:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            f.write(noi_dung_moi)
+        return
+    with LOCK_GITHUB:
+        url = f"https://api.github.com/repos/{REPO_NAME}/contents/{MEMORY_FILE}"
+        headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
         try:
-            res = client.models.generate_content(model=m, contents=prompt)
-            luu_bo_nho_truc_tiep(res.text)
-            return res.text
-        except Exception:
-            time.sleep(1)
-    return du_lieu_tho
+            res = requests.get(url, headers=headers, timeout=10)
+            sha = res.json().get("sha") if res.status_code == 200 else None
+            data = {
+                "message": "Cap nhat ho so van hanh",
+                "content": base64.b64encode(noi_dung_moi.encode("utf-8")).decode("utf-8")
+            }
+            if sha:
+                data["sha"] = sha
+            requests.put(url, headers=headers, json=data, timeout=15)
+        except Exception as e:
+            print(f"Lỗi đẩy bộ nhớ GitHub: {e}")
 
-def luu_bo_nho_truc_tiep(noi_dung):
-    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_BO_NHO}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    r = requests.get(url, headers=headers)
-    sha = r.json().get("sha") if r.status_code == 200 else None
-    
-    data = {
-        "message": "Update bo nho cong ty AI",
-        "content": base64.b64encode(noi_dung.encode("utf-8")).decode("utf-8")
-    }
-    if sha:
-        data["sha"] = sha
-    requests.put(url, json=data, headers=headers)
+def doc_bo_nho():
+    return BO_NHO_RAM
 
-def luu_bo_nho(noi_dung_moi):
-    hien_tai = doc_bo_nho()
-    tong = f"{hien_tai}\n{noi_dung_moi}" if hien_tai != "Chưa có dữ liệu dự án." else noi_dung_moi
-    if len(tong) > 2500:
-        nen_ky_uc_tinh_gon(tong)
+def nen_ky_uc_tinh_gon(van_ban_tho):
+    prompt = (
+        "Biên tập toàn bộ dữ liệu sau thành Hồ Sơ Dự Án cô đọng (tối đa 4500 ký tự). "
+        "Chỉ giữ lại: mục tiêu cốt lõi, thông số kỹ thuật, quyết định đã chốt, các rủi ro đã cảnh báo "
+        "và bài học rút ra. Xóa bỏ mọi lời chào hỏi, câu rỗng nghĩa:\n\n"
+        f"{van_ban_tho}"
+    )
+    ket_qua = goi_gemini(prompt, model_uu_tien="gemini-2.5-flash")
+    return ket_qua if ket_qua else van_ban_tho[-4500:]
+
+def luu_bo_nho(thong_tin_moi, ghi_de=False):
+    global BO_NHO_RAM
+    if ghi_de:
+        BO_NHO_RAM = thong_tin_moi
     else:
-        luu_bo_nho_truc_tiep(tong)
+        BO_NHO_RAM = (BO_NHO_RAM + "\n- " + thong_tin_moi).strip()
+        if len(BO_NHO_RAM) > 6000:
+            BO_NHO_RAM = nen_ky_uc_tinh_gon(BO_NHO_RAM)
+    threading.Thread(target=_day_bo_nho_ngam, args=(BO_NHO_RAM,), daemon=True).start()
 
-def hoi_gemini(vai_tro, noi_dung):
-    prompt = f"Vai trò: {vai_tro}.\nHồ sơ ý chính dự án:\n{doc_bo_nho()[-2500:]}\n\nNhiệm vụ từ Sếp: {noi_dung}\n\nQUY TẮC: Trả lời thẳng vào vấn đề, tối đa 3-4 gạch đầu dòng súc tích (dưới 100 chữ) bằng tiếng Việt."
-    for m in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
+def chat_loc_hoi_thoai_ngam():
+    lich_su_text = "\n".join(list(LICH_SU_CHAT))
+    prompt = (
+        "Trích xuất tối đa 4 gạch đầu dòng các quyết định, thông số kỹ thuật hoặc định hướng mới "
+        "từ đoạn chat sau. Bỏ qua xã giao. Nếu không có dữ liệu dự án mới, trả về đúng chữ: KHONG_CO\n\n"
+        f"{lich_su_text}"
+    )
+    tom_tat = goi_gemini(prompt, model_uu_tien="gemini-2.5-flash-lite")
+    if tom_tat and "KHONG_CO" not in tom_tat:
+        luu_bo_nho(f"[Tổng hợp hội thoại]\n{tom_tat}")
+
+# ==========================================
+# 3. BỘ NÃO AI THỰC CHIẾN & PHẢN BIỆN
+# ==========================================
+LUAT_CHUNG_5_AI = (
+    "LUẬT BẤT DI BẤT DỊCH:\n"
+    "1. CẤM THẢO MAI: Tuyệt đối không dùng các câu mở đầu sáo rỗng như 'Chào Sếp', 'Ý tưởng rất hay', "
+    "'Tôi hoàn toàn đồng ý', 'Rất vui được hỗ trợ'. Vào thẳng vấn đề ngay từ chữ đầu tiên.\n"
+    "2. KHÔNG MÀU HỒNG ẢO TƯỞNG: Mọi phân tích phải dựa trên nguồn lực thực tế (vốn mỏng, đội ngũ tinh gọn, "
+    "cạnh tranh khốc liệt). Nếu ý tưởng có lỗ hổng hoặc đốt tiền vô ích, phải chỉ thẳng mặt.\n"
+    "3. SUY LUẬN LOGIC & CÓ SỐ LIỆU: Nêu rõ nguyên nhân -> hệ quả -> giải pháp cụ thể. Tránh nói chung chung lý thuyết suông."
+)
+
+VAI_TRO_PROMPTS = {
+    "CEO": (
+        f"{LUAT_CHUNG_5_AI}\n"
+        "BẠN LÀ CEO (Tư duy Founder thực chiến, quyết đoán, sắc lạnh): "
+        "Nhiệm vụ của bạn là nhìn bức tranh tổng thể, tối ưu dòng tiền và tốc độ ra sản phẩm. "
+        "Khi Sếp hỏi, hãy cân đo lợi ích - rủi ro, vạch rõ đường đi ngắn nhất ra kết quả thật. "
+        "Nếu cần tranh luận hoặc chỉ ra điểm mù trong suy nghĩ của Sếp, cứ thẳng thắn góp ý như một Co-founder ngang tầm."
+    ),
+    "DEV": (
+        f"{LUAT_CHUNG_5_AI}\n"
+        "BẠN LÀ CTO / LEAD DEV (Thực dụng, am hiểu sâu kiến trúc hệ thống, tối ưu chi phí server): "
+        "Bạn ghét sự màu mè, chỉ quan tâm code chạy được, chịu tải tốt và không tốn tiền ngu. "
+        "Khi MKT hay CEO vẽ ra tính năng phi thực tế hoặc tốn kém, bạn phải phản bác ngay bằng bài toán kỹ thuật, "
+        "thời gian triển khai và chi phí vận hành thực tế."
+    ),
+    "MKT": (
+        f"{LUAT_CHUNG_5_AI}\n"
+        "BẠN LÀ CMO / GROWTH HACKER (Sắc bén về tâm lý khách hàng, chuyển đổi thực tế, không đốt tiền chạy ads mù quáng): "
+        "Bạn chỉ quan tâm sản phẩm có giải quyết nỗi đau thật của khách không và làm sao có khách hàng với chi phí 0 đồng hoặc thấp nhất. "
+        "Nếu DEV làm sản phẩm quá khô khan, khó dùng hoặc lệch nhu cầu thị trường, bạn phải chỉ trích thẳng để kéo lại đúng hướng."
+    ),
+    "QA": (
+        f"{LUAT_CHUNG_5_AI}\n"
+        "BẠN LÀ TRƯỞNG BAN PHẢN BIỆN & QUẢN TRỊ RỦI RO (Đóng vai 'Luật sư của Quỷ' - Devil's Advocate): "
+        "Nhiệm vụ duy nhất của bạn là tìm ra lý do tại sao kế hoạch của CEO, DEV và MKT sẽ thất bại. "
+        "Soi kỹ mọi lỗ hổng: pháp lý, bảo mật, lỗi logic, đứt gãy vận hành, trải nghiệm người dùng tệ. "
+        "Không bao giờ được khen, chỉ được phép chỉ ra điểm chết và yêu cầu phương án vá lỗi."
+    ),
+    "HR": (
+        f"{LUAT_CHUNG_5_AI}\n"
+        "BẠN LÀ GIÁM ĐỐC VẬN HÀNH & TRI THỨC (COO/HR): "
+        "Bạn giữ kỷ luật thực thi, theo dõi tiến độ, nhắc nhở các bộ phận bám sát mục tiêu đã chốt trong hồ sơ, "
+        "không để công ty lan man sang việc phụ."
+    )
+}
+
+def goi_gemini(prompt, system_instruction="", model_uu_tien="gemini-2.5-flash"):
+    danh_sach_model = [model_uu_tien, "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+    for model_name in danh_sach_model:
         try:
-            return client.models.generate_content(model=m, contents=prompt).text
-        except Exception:
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction if system_instruction else None,
+                temperature=0.65
+            )
+            res = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config
+            )
+            if res and res.text:
+                return res.text.strip()
+        except Exception as e:
+            print(f"Model {model_name} lỗi: {e}")
             time.sleep(1)
-    return "Máy chủ AI đang bận, vui lòng thử lại sau 5 giây."
+    return "⚠️ API đang chạm giới hạn lượt gọi miễn phí, đợi 15 giây rồi nhắn tiếp."
 
-def day_code_len_github(code_moi, thong_diep="AI tu nang cap code"):
+def gui_telegram(role, chat_id, text):
+    token = TOKENS.get(role)
+    if not token:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    for i in range(0, len(text), 4000):
+        chunk = text[i:i+4000]
+        try:
+            requests.post(url, json={"chat_id": chat_id, "text": chunk}, timeout=10)
+        except Exception as e:
+            print(f"Lỗi gửi Telegram ({role}): {e}")
+
+def hoi_vai_tro(role, noi_dung_yeu_cau, kem_lich_su=True):
+    bo_nho = doc_bo_nho()[-5000:]
+    lich_su = "\n".join(list(LICH_SU_CHAT)) if kem_lich_su else ""
+
+    full_prompt = (
+        f"=== DỮ LIỆU NỀN & QUYẾT ĐỊNH ĐÃ CHỐT ===\n{bo_nho}\n\n"
+        f"=== MẠCH TRAO ĐỔI GẦN ĐÂY ===\n{lich_su}\n\n"
+        f"=== VẤN ĐỀ CẦN XỬ LÝ NGAY ===\n{noi_dung_yeu_cau}"
+    )
+    # Ưu tiên model thông minh nhất cho tất cả các vai trò để tranh luận ngang tầm
+    return goi_gemini(full_prompt, system_instruction=VAI_TRO_PROMPTS[role], model_uu_tien="gemini-2.5-flash")
+
+# ==========================================
+# 4. TỰ ĐỘNG SỬA CODE LÊN GITHUB (/suacode)
+# ==========================================
+def tu_dong_sua_code(chat_id, yeu_cau):
+    if not GITHUB_TOKEN:
+        gui_telegram("DEV", chat_id, "⚠️ Chưa cài GITHUB_TOKEN trên Render.")
+        return
+
+    gui_telegram("DEV", chat_id, "🛠️ Đang đọc source code và biên dịch bản nâng cấp...")
     url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_PATH}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    r = requests.get(url, headers=headers)
-    sha = r.json().get("sha")
-    data = {
-        "message": thong_diep,
-        "content": base64.b64encode(code_moi.encode("utf-8")).decode("utf-8"),
-        "sha": sha
-    }
-    res = requests.put(url, json=data, headers=headers)
-    return res.status_code in [200, 201]
 
-@bot_ceo.message_handler(commands=['suacode'])
-def tu_sua_code(message):
-    chat_id = message.chat.id
-    yeu_cau = message.text.replace('/suacode', '').strip()
-    if not yeu_cau:
-        bot_dev.send_message(chat_id, "⚠️ Nhập yêu cầu sau lệnh /suacode")
-        return
-    if not GITHUB_TOKEN:
-        bot_dev.send_message(chat_id, "⚠️ Chưa cài GITHUB_TOKEN trên Render!")
-        return
-
-    bot_dev.send_message(chat_id, "🛠️ Dev đang đọc mã nguồn và viết bản nâng cấp...")
-    with open(FILE_PATH, "r", encoding="utf-8") as f:
-        code_hien_tai = f.read()
-
-    prompt_code = f"""Bạn là kỹ sư Python cao cấp. Hãy sửa đoạn code Python dưới đây theo yêu cầu: "{yeu_cau}".
-YÊU CẦU NGHIÊM NGẶT:
-- Chỉ trả về DUY NHẤT mã nguồn Python hoàn chỉnh, KHÔNG bọc trong dấu  hay giải thích gì thêm.
-- Giữ nguyên web server Flask, các biến môi trường os.environ.get(...), cơ chế phân quyền và lệnh /suacode.
-
-Code hiện tại:
-{code_hien_tai}"""
-
-    for m in ["gemini-3.8-flash", "gemini-3.5-flash-lite"]:
-        try:
-            res = client.models.generate_content(model=m, contents=prompt_code)
-            code_moi = res.text.replace("", "").replace("", "").strip()
-            with open("test_temp.py", "w", encoding="utf-8") as f:
-                f.write(code_moi)
-            py_compile.compile("test_temp.py", doraise=True)
-            os.remove("test_temp.py")
-
-            if day_code_len_github(code_moi, f"Update: {yeu_cau[:40]}"):
-                bot_dev.send_message(chat_id, "✅ Code chuẩn! Đã lưu lên GitHub. Render sẽ tự động cập nhật sau ~1 phút!")
-            else:
-                bot_dev.send_message(chat_id, "❌ Lỗi khi đẩy code lên GitHub, kiểm tra lại GITHUB_TOKEN.")
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        if res.status_code != 200:
+            gui_telegram("DEV", chat_id, f"❌ Lỗi đọc GitHub (HTTP {res.status_code}).")
             return
-        except Exception as e:
-            if os.path.exists("test_temp.py"):
-                os.remove("test_temp.py")
-            if m == "gemini-3.5-flash-lite":
-                bot_dev.send_message(chat_id, f"❌ Lỗi cú pháp code nên đã hủy cập nhật để bảo vệ hệ thống: {e}")
+        file_info = res.json()
+        sha = file_info["sha"]
+        code_cu = base64.b64decode(file_info["content"]).decode("utf-8")
 
-@bot_ceo.message_handler(commands=['kiemtra'])
-def kiem_tra(message):
-    noi_dung_bo_nho = doc_bo_nho()
-    if noi_dung_bo_nho != "Chưa có dữ liệu dự án.":
-        bot_hr.send_message(message.chat.id, f"📂 Dung lượng: {len(noi_dung_bo_nho.encode('utf-8'))} bytes\n\n{noi_dung_bo_nho[-1500:]}")
-    else:
-        bot_hr.send_message(message.chat.id, "⚠️ Chưa có file bộ nhớ.")
+        prompt_code = (
+            "Bạn là Senior Python Engineer. Hãy nâng cấp file main.py dưới đây theo yêu cầu.\n"
+            f"YÊU CẦU: {yeu_cau}\n\n"
+            "QUY TẮC:\n"
+            "1. Giữ nguyên kiến trúc Flask, bộ nhớ RAM/GitHub, hệ thống 5 AI phản biện và các lệnh hiện tại.\n"
+            "2. Trả về DUY NHẤT code Python thuần túy, KHÔNG markdown ```python, KHÔNG giải thích.\n\n"
+            f"CODE HIỆN TẠI:\n{code_cu}"
+        )
+        code_moi = goi_gemini(prompt_code, model_uu_tien="gemini-2.5-flash")
+        code_moi = code_moi.replace("```python", "").replace("```", "").strip()
 
-@bot_ceo.message_handler(commands=['dondep'])
-def don_dep(message):
-    noi_dung_bo_nho = doc_bo_nho()
-    if noi_dung_bo_nho != "Chưa có dữ liệu dự án.":
-        ban_nen = nen_ky_uc_tinh_gon(noi_dung_bo_nho)
-        bot_hr.send_message(message.chat.id, f"✅ Đã nén xong:\n\n{ban_nen}")
-    else:
-        bot_hr.send_message(message.chat.id, "⚠️ Chưa có file bộ nhớ để dọn dẹp.")
+        with open("test_syntax.py", "w", encoding="utf-8") as f:
+            f.write(code_moi)
+        py_compile.compile("test_syntax.py", doraise=True)
 
-def lay_noi_dung_lenh(text, lenh):
-    return text.replace(lenh, '', 1).strip()
+        payload = {
+            "message": f"Auto-upgrade: {yeu_cau[:50]}",
+            "content": base64.b64encode(code_moi.encode("utf-8")).decode("utf-8"),
+            "sha": sha
+        }
+        put_res = requests.put(url, headers=headers, json=payload, timeout=15)
+        if put_res.status_code in [200, 201]:
+            gui_telegram("DEV", chat_id, "✅ Code chuẩn! Đã lưu lên GitHub. Render tự cập nhật sau ~1 phút.")
+        else:
+            gui_telegram("DEV", chat_id, f"❌ Lỗi đẩy GitHub: {put_res.text[:200]}")
+    except py_compile.PyCompileError as e:
+        gui_telegram("DEV", chat_id, f"🛑 Code mới lỗi cú pháp, đã hủy để bảo vệ server:\n{e}")
+    except Exception as e:
+        gui_telegram("DEV", chat_id, f"❌ Lỗi hệ thống: {e}")
 
-@bot_ceo.message_handler(commands=['dev'])
-def goi_rieng_dev(message):
-    nd = lay_noi_dung_lenh(message.text, '/dev')
-    if nd: bot_dev.send_message(message.chat.id, f"💻 Dev:\n{hoi_gemini('Trưởng phòng Kỹ thuật (Dev)', nd)}")
+# ==========================================
+# 5. XỬ LÝ LỆNH & PHÒNG HỌP TRANH LUẬN THỰC CHIẾN
+# ==========================================
+def xu_ly_tin_nhan(chat_id, ten_nguoi_gui, text):
+    global DEM_TIN_NHAN
+    text = text.strip()
+    if not text:
+        return
 
-@bot_ceo.message_handler(commands=['mkt'])
-def goi_rieng_mkt(message):
-    nd = lay_noi_dung_lenh(message.text, '/mkt')
-    if nd: bot_mkt.send_message(message.chat.id, f"📢 Marketing:\n{hoi_gemini('Trưởng phòng Marketing', nd)}")
+    if text.startswith("/suacode"):
+        yeu_cau = text.replace("/suacode", "", 1).strip()
+        if not yeu_cau:
+            gui_telegram("DEV", chat_id, "Nhập yêu cầu sau /suacode.")
+            return
+        threading.Thread(target=tu_dong_sua_code, args=(chat_id, yeu_cau), daemon=True).start()
+        return
 
-@bot_ceo.message_handler(commands=['qa'])
-def goi_rieng_qa(message):
-    nd = lay_noi_dung_lenh(message.text, '/qa')
-    if nd: bot_qa.send_message(message.chat.id, f"🔍 QA:\n{hoi_gemini('Chuyên gia Kiểm thử (QA)', nd)}")
+    if text.startswith("/dev"):
+        nd = text.replace("/dev", "", 1).strip()
+        tra_loi = hoi_vai_tro("DEV", nd)
+        gui_telegram("DEV", chat_id, tra_loi)
+        LICH_SU_CHAT.append(f"Sếp: {text}\nDEV: {tra_loi}")
+        return
 
-@bot_ceo.message_handler(commands=['daotao', 'hr'])
-def goi_rieng_hr(message):
-    nd = message.text.split(' ', 1)[1].strip() if ' ' in message.text else ''
-    if nd:
-        tl = hoi_gemini("Giám đốc Đào tạo & Thư ký (HR)", nd)
-        luu_bo_nho(f"[Chỉ thị HR: {nd}]\n{tl}")
-        bot_hr.send_message(message.chat.id, f"🧠 Đào tạo (HR) & đã lưu:\n{tl}")
+    if text.startswith("/mkt"):
+        nd = text.replace("/mkt", "", 1).strip()
+        tra_loi = hoi_vai_tro("MKT", nd)
+        gui_telegram("MKT", chat_id, tra_loi)
+        LICH_SU_CHAT.append(f"Sếp: {text}\nMKT: {tra_loi}")
+        return
 
-@bot_ceo.message_handler(commands=['hop'])
-def hop_toan_cong_ty(message):
-    chat_id = message.chat.id
-    sk = lay_noi_dung_lenh(message.text, '/hop')
-    if not sk: return
-    ceo = hoi_gemini("CEO chiến lược", f"Chủ trì họp về: '{sk}'. Phân tích ngắn và giao việc.")
-    bot_ceo.send_message(chat_id, f"👔 CEO:\n{ceo}")
-    time.sleep(2)
-    dev = hoi_gemini("Trưởng phòng Dev", f"Từ CEO: '{ceo}', đề xuất kỹ thuật cho: '{sk}'.")
-    bot_dev.send_message(chat_id, f"💻 Dev:\n{dev}")
-    time.sleep(2)
-    mkt = hoi_gemini("Trưởng phòng Marketing", f"Từ CEO: '{ceo}', đề xuất triển khai cho: '{sk}'.")
-    bot_mkt.send_message(chat_id, f"📢 Marketing:\n{mkt}")
-    time.sleep(2)
-    qa = hoi_gemini("Chuyên gia QA", f"Chỉ ra 3 lỗ hổng trong phương án Dev ('{dev}') và MKT ('{mkt}').")
-    bot_qa.send_message(chat_id, f"🔍 QA:\n{qa}")
-    time.sleep(2)
-    hr = hoi_gemini("Thư ký HR", f"Chốt 3 ý chính cuộc họp '{sk}' và cách sửa lỗi QA ('{qa}').")
-    luu_bo_nho(f"[Cuộc họp: {sk}]\n{hr}")
-    bot_hr.send_message(chat_id, f"🧠 HR (Đã lưu):\n{hr}")
-
-@bot_ceo.message_handler(func=lambda message: True)
-def lam_viec_voi_ceo(message):
-    if not message.text.startswith('/'):
-        bot_ceo.send_message(message.chat.id, f"👔 CEO:\n{hoi_gemini('CEO điều hành trực tiếp của Sếp', message.text)}")
-
-if __name__ == "__main__":
-    threading.Thread(target=run_web, daemon=True).start()
-    bot_ceo.infinity_polling(timeout=60, long_polling_timeout=60)
+    if text.startswith("/qa"):
+        nd = text.replace("/qa", "", 1).strip()
+        tra_loi = hoi_vai_tro("QA", nd)
+        gui_telegram("QA", chat_id, tra_loi)
+        LICH_SU_CHAT.append(f"Sếp: {text}\nQA
