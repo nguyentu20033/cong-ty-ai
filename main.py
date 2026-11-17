@@ -33,9 +33,15 @@ FILE_PATH = "main.py"
 FILE_BO_NHO = "bo_nho_cong_ty_AI.txt"
 
 def doc_bo_nho():
-    if os.path.exists(FILE_BO_NHO):
-        with open(FILE_BO_NHO, "r", encoding="utf-8") as f:
-            return f.read()
+    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_BO_NHO}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            content_encoded = r.json().get("content", "")
+            return base64.b64decode(content_encoded).decode("utf-8")
+    except Exception:
+        pass
     return "Chưa có dữ liệu dự án."
 
 def nen_ky_uc_tinh_gon(du_lieu_tho):
@@ -43,20 +49,33 @@ def nen_ky_uc_tinh_gon(du_lieu_tho):
     for m in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
         try:
             res = client.models.generate_content(model=m, contents=prompt)
-            with open(FILE_BO_NHO, "w", encoding="utf-8") as f:
-                f.write(res.text)
+            luu_bo_nho_truc_tiep(res.text)
             return res.text
         except Exception:
             time.sleep(1)
     return du_lieu_tho
 
+def luu_bo_nho_truc_tiep(noi_dung):
+    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_BO_NHO}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    r = requests.get(url, headers=headers)
+    sha = r.json().get("sha") if r.status_code == 200 else None
+    
+    data = {
+        "message": "Update bo nho cong ty AI",
+        "content": base64.b64encode(noi_dung.encode("utf-8")).decode("utf-8")
+    }
+    if sha:
+        data["sha"] = sha
+    requests.put(url, json=data, headers=headers)
+
 def luu_bo_nho(noi_dung_moi):
-    tong = f"{doc_bo_nho()}\n{noi_dung_moi}"
+    hien_tai = doc_bo_nho()
+    tong = f"{hien_tai}\n{noi_dung_moi}" if hien_tai != "Chưa có dữ liệu dự án." else noi_dung_moi
     if len(tong) > 2500:
         nen_ky_uc_tinh_gon(tong)
     else:
-        with open(FILE_BO_NHO, "a", encoding="utf-8") as f:
-            f.write(f"\n{noi_dung_moi}")
+        luu_bo_nho_truc_tiep(tong)
 
 def hoi_gemini(vai_tro, noi_dung):
     prompt = f"Vai trò: {vai_tro}.\nHồ sơ ý chính dự án:\n{doc_bo_nho()[-2500:]}\n\nNhiệm vụ từ Sếp: {noi_dung}\n\nQUY TẮC: Trả lời thẳng vào vấn đề, tối đa 3-4 gạch đầu dòng súc tích (dưới 100 chữ) bằng tiếng Việt."
@@ -97,7 +116,7 @@ def tu_sua_code(message):
 
     prompt_code = f"""Bạn là kỹ sư Python cao cấp. Hãy sửa đoạn code Python dưới đây theo yêu cầu: "{yeu_cau}".
 YÊU CẦU NGHIÊM NGẶT:
-- Chỉ trả về DUY NHẤT mã nguồn Python hoàn chỉnh, KHÔNG bọc trong dấu ```python hay giải thích gì thêm.
+- Chỉ trả về DUY NHẤT mã nguồn Python hoàn chỉnh, KHÔNG bọc trong dấu  hay giải thích gì thêm.
 - Giữ nguyên web server Flask, các biến môi trường os.environ.get(...), cơ chế phân quyền và lệnh /suacode.
 
 Code hiện tại:
@@ -106,7 +125,7 @@ Code hiện tại:
     for m in ["gemini-3.8-flash", "gemini-3.5-flash-lite"]:
         try:
             res = client.models.generate_content(model=m, contents=prompt_code)
-            code_moi = res.text.replace("```python", "").replace("```", "").strip()
+            code_moi = res.text.replace("", "").replace("", "").strip()
             with open("test_temp.py", "w", encoding="utf-8") as f:
                 f.write(code_moi)
             py_compile.compile("test_temp.py", doraise=True)
@@ -125,16 +144,20 @@ Code hiện tại:
 
 @bot_ceo.message_handler(commands=['kiemtra'])
 def kiem_tra(message):
-    if os.path.exists(FILE_BO_NHO):
-        bot_hr.send_message(message.chat.id, f"📂 Dung lượng: {os.path.getsize(FILE_BO_NHO)} bytes\n\n{doc_bo_nho()[-1500:]}")
+    noi_dung_bo_nho = doc_bo_nho()
+    if noi_dung_bo_nho != "Chưa có dữ liệu dự án.":
+        bot_hr.send_message(message.chat.id, f"📂 Dung lượng: {len(noi_dung_bo_nho.encode('utf-8'))} bytes\n\n{noi_dung_bo_nho[-1500:]}")
     else:
         bot_hr.send_message(message.chat.id, "⚠️ Chưa có file bộ nhớ.")
 
 @bot_ceo.message_handler(commands=['dondep'])
 def don_dep(message):
-    if os.path.exists(FILE_BO_NHO):
-        ban_nen = nen_ky_uc_tinh_gon(doc_bo_nho())
+    noi_dung_bo_nho = doc_bo_nho()
+    if noi_dung_bo_nho != "Chưa có dữ liệu dự án.":
+        ban_nen = nen_ky_uc_tinh_gon(noi_dung_bo_nho)
         bot_hr.send_message(message.chat.id, f"✅ Đã nén xong:\n\n{ban_nen}")
+    else:
+        bot_hr.send_message(message.chat.id, "⚠️ Chưa có file bộ nhớ để dọn dẹp.")
 
 def lay_noi_dung_lenh(text, lenh):
     return text.replace(lenh, '', 1).strip()
