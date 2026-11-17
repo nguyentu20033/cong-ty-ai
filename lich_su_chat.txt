@@ -16,3 +16,6 @@ CEO: * **Gợi ý game:** Trò chơi trắc nghiệm "Hiểu nhau đến đâu" 
 * **Cách chơi:** Gửi thẳng một đường link qua chat, bạn gái click vào là chơi trực tiếp không cần tải app.
 * **Mục đích:** Vừa giải trí, vừa tạo tiếng cười để làm hòa nhanh chóng. Sếp duyệt không để em triển khai link mẫu?
 Sếp: Sao chép đuocje game chú bé rông không
+CEO: * **Không thể sao chép trực tiếp:** "Chú Bé Rồng" là game bản quyền lớn, không thể copy nguyên xi sang link web đơn giản được ạ.
+* **Phương án thay thế:** Em sẽ tìm các game nhập vai luyện chưởng web-based tương tự hoặc làm một minigame dạng "Đấm bốc xả giận" để Sếp gửi bạn gái chơi ngay.
+* Sếp có duyệt làm minigame tùy chỉnh riêng không ạ?
