@@ -31,6 +31,48 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = "nguyentu20033/cong-ty-ai"
 FILE_PATH = "main.py"
 FILE_BO_NHO = "bo_nho_cong_ty_AI.txt"
+FILE_LICH_SU_CHAT = "lich_su_chat.txt"
+
+LICH_SU_CHAT = []
+
+def tai_lich_su_chat():
+    global LICH_SU_CHAT
+    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_LICH_SU_CHAT}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            content_encoded = r.json().get("content", "")
+            noi_dung = base64.b64decode(content_encoded).decode("utf-8")
+            dong_chat = [line.strip() for line in noi_dung.split("\n") if line.strip()]
+            LICH_SU_CHAT = dong_chat[-20:]
+    except Exception:
+        pass
+
+def luu_lich_su_chat_len_github():
+    global LICH_SU_CHAT
+    noi_dung = "\n".join(LICH_SU_CHAT)
+    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_LICH_SU_CHAT}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers)
+        sha = r.json().get("sha") if r.status_code == 200 else None
+        data = {
+            "message": "Update lich su chat",
+            "content": base64.b64encode(noi_dung.encode("utf-8")).decode("utf-8")
+        }
+        if sha:
+            data["sha"] = sha
+        requests.put(url, json=data, headers=headers)
+    except Exception:
+        pass
+
+def them_vao_lich_su(cau_chat):
+    global LICH_SU_CHAT
+    LICH_SU_CHAT.append(cau_chat)
+    if len(LICH_SU_CHAT) > 20:
+        LICH_SU_CHAT = LICH_SU_CHAT[-20:]
+    threading.Thread(target=luu_lich_su_chat_len_github, daemon=True).start()
 
 def doc_bo_nho():
     url = f"https://api.github.com/repos/{REPO_NAME}/contents/{FILE_BO_NHO}"
@@ -78,7 +120,8 @@ def luu_bo_nho(noi_dung_moi):
         luu_bo_nho_truc_tiep(tong)
 
 def hoi_gemini(vai_tro, noi_dung):
-    prompt = f"Vai trò: {vai_tro}.\nHồ sơ ý chính dự án:\n{doc_bo_nho()[-2500:]}\n\nNhiệm vụ từ Sếp: {noi_dung}\n\nQUY TẮC: Trả lời thẳng vào vấn đề, tối đa 3-4 gạch đầu dòng súc tích (dưới 100 chữ) bằng tiếng Việt."
+    lich_su_str = "\n".join(LICH_SU_CHAT) if LICH_SU_CHAT else "Chưa có lịch sử."
+    prompt = f"Vai trò: {vai_tro}.\nHồ sơ ý chính dự án:\n{doc_bo_nho()[-2500:]}\n\nLịch sử chat gần nhất:\n{lich_su_str}\n\nNhiệm vụ từ Sếp: {noi_dung}\n\nQUY TẮC: Trả lời thẳng vào vấn đề, tối đa 3-4 gạch đầu dòng súc tích (dưới 100 chữ) bằng tiếng Việt."
     for m in ["gemini-3.5-flash-lite", "gemini-3.8-flash"]:
         try:
             return client.models.generate_content(model=m, contents=prompt).text
@@ -260,23 +303,37 @@ def lay_noi_dung_lenh(text, lenh):
 @bot_ceo.message_handler(commands=['dev'])
 def goi_rieng_dev(message):
     nd = lay_noi_dung_lenh(message.text, '/dev')
-    if nd: bot_dev.send_message(message.chat.id, f"💻 Dev:\n{hoi_gemini('Trưởng phòng Kỹ thuật (Dev)', nd)}")
+    if nd:
+        them_vao_lich_su(f"Sếp hỏi Dev: {nd}")
+        tl = hoi_gemini('Trưởng phòng Kỹ thuật (Dev)', nd)
+        them_vao_lich_su(f"Dev trả lời: {tl}")
+        bot_dev.send_message(message.chat.id, f"💻 Dev:\n{tl}")
 
 @bot_ceo.message_handler(commands=['mkt'])
 def goi_rieng_mkt(message):
     nd = lay_noi_dung_lenh(message.text, '/mkt')
-    if nd: bot_mkt.send_message(message.chat.id, f"📢 Marketing:\n{hoi_gemini('Trưởng phòng Marketing', nd)}")
+    if nd:
+        them_vao_lich_su(f"Sếp hỏi Marketing: {nd}")
+        tl = hoi_gemini('Trưởng phòng Marketing', nd)
+        them_vao_lich_su(f"Marketing trả lời: {tl}")
+        bot_mkt.send_message(message.chat.id, f"📢 Marketing:\n{tl}")
 
 @bot_ceo.message_handler(commands=['qa'])
 def goi_rieng_qa(message):
     nd = lay_noi_dung_lenh(message.text, '/qa')
-    if nd: bot_qa.send_message(message.chat.id, f"🔍 QA:\n{hoi_gemini('Chuyên gia Kiểm thử (QA)', nd)}")
+    if nd:
+        them_vao_lich_su(f"Sếp hỏi QA: {nd}")
+        tl = hoi_gemini('Chuyên gia Kiểm thử (QA)', nd)
+        them_vao_lich_su(f"QA trả lời: {tl}")
+        bot_qa.send_message(message.chat.id, f"🔍 QA:\n{tl}")
 
 @bot_ceo.message_handler(commands=['daotao', 'hr'])
 def goi_rieng_hr(message):
     nd = message.text.split(' ', 1)[1].strip() if ' ' in message.text else ''
     if nd:
+        them_vao_lich_su(f"Sếp hỏi HR: {nd}")
         tl = hoi_gemini("Giám đốc Đào tạo & Thư ký (HR)", nd)
+        them_vao_lich_su(f"HR trả lời: {tl}")
         luu_bo_nho(f"[Chỉ thị HR: {nd}]\n{tl}")
         bot_hr.send_message(message.chat.id, f"🧠 Đào tạo (HR) & đã lưu:\n{tl}")
 
@@ -285,27 +342,41 @@ def hop_toan_cong_ty(message):
     chat_id = message.chat.id
     sk = lay_noi_dung_lenh(message.text, '/hop')
     if not sk: return
+    them_vao_lich_su(f"Yêu cầu họp: {sk}")
     ceo = hoi_gemini("CEO chiến lược", f"Chủ trì họp về: '{sk}'. Phân tích ngắn và giao việc.")
+    them_vao_lich_su(f"CEO: {ceo}")
     bot_ceo.send_message(chat_id, f"👔 CEO:\n{ceo}")
     time.sleep(2)
     dev = hoi_gemini("Trưởng phòng Dev", f"Từ CEO: '{ceo}', đề xuất kỹ thuật cho: '{sk}'.")
+    them_vao_lich_su(f"Dev: {dev}")
     bot_dev.send_message(chat_id, f"💻 Dev:\n{dev}")
     time.sleep(2)
     mkt = hoi_gemini("Trưởng phòng Marketing", f"Từ CEO: '{ceo}', đề xuất triển khai cho: '{sk}'.")
+    them_vao_lich_su(f"Marketing: {mkt}")
     bot_mkt.send_message(chat_id, f"📢 Marketing:\n{mkt}")
     time.sleep(2)
     qa = hoi_gemini("Chuyên gia QA", f"Chỉ ra 3 lỗ hổng trong phương án Dev ('{dev}') và MKT ('{mkt}').")
+    them_vao_lich_su(f"QA: {qa}")
     bot_qa.send_message(chat_id, f"🔍 QA:\n{qa}")
     time.sleep(2)
     hr = hoi_gemini("Thư ký HR", f"Chốt 3 ý chính cuộc họp '{sk}' và cách sửa lỗi QA ('{qa}').")
+    them_vao_lich_su(f"HR: {hr}")
     luu_bo_nho(f"[Cuộc họp: {sk}]\n{hr}")
     bot_hr.send_message(chat_id, f"🧠 HR (Đã lưu):\n{hr}")
 
 @bot_ceo.message_handler(func=lambda message: True)
 def lam_viec_voi_ceo(message):
     if not message.text.startswith('/'):
-        bot_ceo.send_message(message.chat.id, f"👔 CEO:\n{hoi_gemini('CEO điều hành trực tiếp của Sếp', message.text)}")
+        them_vao_lich_su(f"Sếp: {message.text}")
+        tl = hoi_gemini('CEO điều hành trực tiếp của Sếp', message.text)
+        them_vao_lich_su(f"CEO: {tl}")
+        bot_ceo.send_message(message.chat.id, f"👔 CEO:\n{tl}")
+
+def lang_nghe_telegram():
+    tai_lich_su_chat()
+    bot_ceo.infinity_polling(timeout=60, long_polling_timeout=60)
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
-    bot_ceo.infinity_polling(timeout=60, long_polling_timeout=60)
+    print("Đã xong")
+    lang_nghe_telegram()
